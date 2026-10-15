@@ -6,6 +6,8 @@ Controls
   - Mouse wheel ................. +/- 1 minute
   - Click the purple knob ....... start / pause
   - Drag the purple rim ......... move the timer around the screen
+  - Drag the rim grip (bottom-right) or Ctrl + wheel ... resize
+  - SKIP button (during breaks) . jump straight to the next focus block
   - Right-click ................. menu (lengths, opacity, size, pings, quit)
   - Space = start/pause, R = reset, N = skip, Ctrl+Q = quit
 """
@@ -25,6 +27,7 @@ import winsound
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(APP_DIR, "pomodoro_settings.json")
 
+MIN_SIZE, MAX_SIZE = 160, 900
 KEY = "#010203"  # window colour that Windows renders fully transparent
 BEZEL = "#B98CF0"
 BEZEL_DARK = "#9563DA"
@@ -293,6 +296,16 @@ class PomodoroApp:
         cv.create_oval(c - Rf - 3, c - Rf - 3, c + Rf + 3, c + Rf + 3, fill=BEZEL_DARK, outline="")
         cv.create_oval(c - Rf, c - Rf, c + Rf, c + Rf, fill=FACE, outline="")
 
+        # resize grip on the rim, bottom-right
+        gx, gy = self.polar(22.5, (R + Rf) / 2)
+        gr = (R - Rf) * 0.62
+        self.grip = (gx, gy, gr * 1.4)
+        cv.create_oval(gx - gr, gy - gr, gx + gr, gy + gr, fill="#D9C2FA", outline=BEZEL_DARK,
+                       width=max(1, S // 200))
+        for k, d in ((-0.38, gr * 0.3), (0.0, gr * 0.55), (0.38, gr * 0.3)):
+            cv.create_line(gx - d + k * gr, gy + d + k * gr, gx + d + k * gr, gy - d + k * gr,
+                           fill=BEZEL_DARK, width=max(1, S // 220))
+
         for i in range(60):
             major = i % 5 == 0
             r1 = Rf * (0.64 if major else 0.69)
@@ -350,6 +363,19 @@ class PomodoroApp:
             sub = "PAUSED" if self.started else sub
         cv.create_text(c, py + ph * 0.29, text=sub, fill="#FFFFFF",
                        font=("Segoe UI", -max(8, int(S * 0.027)), "bold"), tags="dyn")
+
+        # skip-break button, left of the knob (breaks only use the right half of the dial)
+        self.skip_box = None
+        if self.phase != "focus":
+            bx, bw, bh = c - Rf * 0.43, Rf * 0.30, Rf * 0.13
+            self.skip_box = (bx - bw / 2, c - bh / 2, bx + bw / 2, c + bh / 2)
+            x0, y0, x1, y1 = self.skip_box
+            r2 = bh / 2
+            cv.create_polygon(
+                x0 + r2, y0, x1 - r2, y0, x1, y0, x1, y1, x1 - r2, y1, x0 + r2, y1, x0, y1, x0, y0,
+                smooth=True, fill="#FFFFFF", outline=p["pill"], width=max(1, S // 170), tags="dyn")
+            cv.create_text(bx, c, text="SKIP ▶▶", fill=p["pill"],
+                           font=("Segoe UI", -max(8, int(S * 0.028)), "bold"), tags="dyn")
 
         # knob
         kr = Rf * 0.19
@@ -473,7 +499,14 @@ class PomodoroApp:
     def on_press(self, e):
         self.root.focus_force()
         d = math.hypot(e.x - self.c, e.y - self.c)
-        if d <= self.knob_r:
+        gx, gy, gr = self.grip
+        sb = self.skip_box
+        if math.hypot(e.x - gx, e.y - gy) <= gr:
+            self.press = "resize"
+            self.grip_frac = (gx + gy) / 2 / self.S
+        elif sb and sb[0] <= e.x <= sb[2] and sb[1] <= e.y <= sb[3]:
+            self.press = "skip"
+        elif d <= self.knob_r:
             self.press = "knob"
         elif d <= self.Rf:
             self.press = "dial"
@@ -488,16 +521,38 @@ class PomodoroApp:
             self.set_remaining(self.dial_minutes(e.x, e.y) * 60)
         elif self.press == "move":
             self.root.geometry(f"+{e.x_root - self.drag_off[0]}+{e.y_root - self.drag_off[1]}")
+        elif self.press == "resize":
+            local = (e.x_root - self.root.winfo_x() + e.y_root - self.root.winfo_y()) / 2
+            new = local / self.grip_frac / self.dpi
+            if abs(new - self.cfg["size"]) >= 3:
+                self.resize(new, save=False)
 
     def on_release(self, e):
         if self.press == "knob" and math.hypot(e.x - self.c, e.y - self.c) <= self.knob_r:
             self.toggle()
+        elif self.press == "skip":
+            sb = self.skip_box
+            if sb and sb[0] <= e.x <= sb[2] and sb[1] <= e.y <= sb[3]:
+                self.skip()
         elif self.press == "move":
             self.cfg["x"], self.cfg["y"] = self.root.winfo_x(), self.root.winfo_y()
             self.save()
+        elif self.press == "resize":
+            self.save()
         self.press = None
 
+    def resize(self, size, save=True):
+        self.cfg["size"] = int(max(MIN_SIZE, min(MAX_SIZE, size)))
+        self.cfg["x"], self.cfg["y"] = self.root.winfo_x(), self.root.winfo_y()
+        self.vars["size"].set(self.cfg["size"])
+        self.apply_size()
+        if save:
+            self.save()
+
     def on_wheel(self, e):
+        if e.state & 0x0004:  # Ctrl held: resize instead of changing the time
+            self.resize(self.cfg["size"] + (20 if e.delta > 0 else -20))
+            return
         rem = self.current_remaining()
         if e.delta > 0:
             self.set_remaining(math.floor(rem / 60) * 60 + 60)

@@ -17,6 +17,8 @@ pythonw pomodoro.pyw
 | Set time (0–60 min) | Drag around the dial, or scroll the mouse wheel (±1 min) |
 | Start / pause | Click the purple knob, or press Space |
 | Move the timer | Drag the purple rim |
+| Resize | Drag the round grip on the rim (bottom-right), or Ctrl + mouse wheel |
+| Skip a break | Click **SKIP ▶▶** on the dial (shown only during breaks) |
 | Menu | Right-click: focus/break lengths, check-in pings, auto-start, size, opacity, always on top, test notification |
 | Reset / skip / quit | R / N / Ctrl+Q |
 
